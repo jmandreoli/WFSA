@@ -1,0 +1,197 @@
+# File:                 core.py
+# Creation date:        2019-11-14
+# Contributors:         Jean-Marc Andreoli
+# Language:             python
+# Purpose:              Implementation of Weighted Finite State Automata
+#
+r"""
+:mod:`WFSA.core` --- Weighted Finite State Automata
+===================================================
+
+This module provides core functionalities of Weighted FSA.
+
+Available types and functions
+-----------------------------
+"""
+
+import logging
+logger = logging.getLogger(__name__)
+from numpy import ndarray, all, sum, array, arange, zeros, ones, log, unique, amin, amax, empty
+from scipy.sparse import csr_matrix, vstack as spvstack
+from .util import WFSABrowsePlugin, NameMap, lmatrix, csra_matrix, onehot
+
+#===============================================================================
+class WFSA (WFSABrowsePlugin):
+#===============================================================================
+  r"""
+An instances of this class is a Weighted Finite State Automaton, specified as an assignment of a transition matrix to each symbol in an alphabet. No initial nor final state is specified at that point.
+
+WFSA intersection is supported through operator ``@``. It is essentially commutative, except for the state names, hence the choice of ``@`` instead of ``*``: state names of the intersection are composed by joining names from the operands with ``.``.
+
+An additional transition matrix (called a template) can optionally be specified in a WFSA. It is used when intersecting automata with different alphabets. Each time a symbol is present in one operand, but not in the other, the template of the second operand, if present, is used as default transition matrix for that symbol in the second operand. Also, if both operands have a template, the intersection also has a template, computed as for the other transition matrices.
+
+:param W: a list of transition (square) matrices with the same shape and type, one for each symbol in the alphabet
+:type W: :class:`Union[Iterable[numpy.ndarray],Iterable[scipy.sparse.csr_matrix],Iterable[csra_matrix]]`
+:param template: a transition (square) matrix of same shape and type as those in *W*
+:type template: :class:`Union[NoneType,numpy.ndarray,scipy.sparse.csr_matrix,csra_matrix]`
+:param state_names: the list of names of the states (indices in each transition matrix)
+:type state_names: Iterable[:class:`str`]
+:param symb_names: the list of names of the symbols (indices in the list of transition matrices)
+:type symb_names: Iterable[:class:`str`]
+:param check: whether to make verifications at initialisation (use :const:`False` when already verified upstream)
+:type check: :class:`bool`
+
+Attributes: :attr:`W` (cast as a :class:`tuple`), :attr:`template`, :attr:`symb_names`, :attr:`state_names` (the latter two cast as :class:`.NameMap`) and
+
+.. attribute:: mtype
+
+   The common type of all the transition matrices (one of the supported types)
+
+.. attribute:: N
+
+   The number of states
+
+.. attribute:: n
+
+   The number of symbols in the alphabet
+
+Methods:
+  """
+
+#-------------------------------------------------------------------------------
+  def __init__(self,*a,**ka):
+#-------------------------------------------------------------------------------
+    self.init_struct(*a,**ka)
+    self.init_type()
+
+#-------------------------------------------------------------------------------
+  def init_struct(self,W,template=None,state_names=None,symb_names=None,check=True):
+#-------------------------------------------------------------------------------
+    W = tuple(W)
+    base = W[0] if template is None else template
+    if check:
+      N,N_ = base.shape
+      if not isinstance(base,(ndarray,csr_matrix)): raise ValueError('Unsupported matrix type {}'.format(base.__class__))
+      if any([type(w)!=type(base) for w in W]): raise ValueError('Transition matrices must all be of the same type')
+      if N!=N_ or any([w.shape!=(N,N) for w in W]): raise ValueError('Transition matrices must all be of the same square shape')
+      for c,w in enumerate(W):
+        if amin(w)<0.: raise ValueError('Negative transition weight in symbol: {}'.format(c))
+      if template is not None and amin(template)<0.: raise ValueError('Negative transition weight in template')
+      if state_names is not None and (len(state_names)!=N or not all([isinstance(x,str) for x in state_names])): raise ValueError('State name list must contain strings and match state dimension')
+      if symb_names is not None and (len(symb_names)!=len(W) or not all([isinstance(x,str) for x in symb_names])): raise ValueError('Symbol name list must contain strings and match alphabet length')
+    self.W = W
+    self.template = template
+    self.n = len(W)
+    self.N = base.shape[0]
+    self.mtype = type(base)
+    if state_names is None: state_names = self.default_state_names()
+    self.state_names = NameMap(state_names)
+    if symb_names is None: symb_names = self.default_symb_names()
+    self.symb_names = NameMap(symb_names)
+
+#-------------------------------------------------------------------------------
+  def init_type(self):
+#-------------------------------------------------------------------------------
+    # Initialisation of special methods dependent on matrix type
+    if issubclass(self.mtype,ndarray):
+      def initial(a,size,N=self.N): r = empty((size,N)); r[...] = a[None,:]; return r
+      def max_normalise(m):
+        x = amax(m,axis=1,keepdims=True)
+        x[x==0] = 1; m /= x
+        return x
+      product = lambda w1,w2: einsum('ij,kl->ikjl',w1,w2).reshape(2*(w1.shape[0]*w2.shape[0],))
+    elif issubclass(self.mtype,csr_matrix):
+      if issubclass(self.mtype,csra_matrix):
+        factory = csra_matrix.initial
+        def initial(a,size,N=self.N,factory=factory): return factory(a[None,:],n=size)
+      else:
+        factory = self.mtype
+        def initial(a,size,N=self.N,factory=factory): return spvstack(size*(factory(a,(1,N)),))
+      def max_normalise(m):
+        x = ones((m.shape[0],1))
+        for i,(k,k_) in enumerate(zip(m.indptr[:-1],m.indptr[1:])):
+          xi = amax(m.data[k:k_],initial=0.)
+          if xi: x[i] = xi; m.data[k:k_] /= xi
+        return x
+      def product(w1,w2,factory=factory):
+        N1,N2 = w1.shape[0],w2.shape[0]
+        Z,I,J = zip(*((w1[i1,j1]*w2[i2,j2],N2*i1+i2,N2*j1+j2) for i1,j1 in zip(*w1.nonzero()) for i2,j2 in zip(*w2.nonzero())))
+        return factory((Z,(I,J)),shape=2*(N1*N2,))
+    else: raise Exception('Should not happen if matrix type has been properly checked')
+    self.product,self.initial,self.max_normalise = product,initial,max_normalise
+
+#-------------------------------------------------------------------------------
+  deterministic_ = None
+  @property
+  def deterministic(self):
+    r"""
+Returns whether this automaton is deterministic.
+    """
+#-------------------------------------------------------------------------------
+    r = self.deterministic_
+    if r is None:
+      r = self.deterministic_ = all([all(sum(w!=0,axis=1)<2) for w in self.W])
+      if r and self.N>10 and not issubclass(self.mtype,csra_matrix):
+        logger.warning('Deterministic automata with type %s may be inefficient. Use type csra_matrix instead.',self.mtype)
+    return r
+
+#-------------------------------------------------------------------------------
+  def initialise(self,start,size):
+    r"""
+Returns an initial state-weight assignment for method :meth:`run` as a log-domain matrix. If *start* is specified as a single state, it is taken to be the one-hot assignment to that state.
+
+:param start: an initial state-weight assignment as a vector of length :math:`N`, the number of states in this automaton
+:type start: :class:`Union[str,int,numpy.ndarray]`
+:param size: number :math:`M` of samples
+:type size: :class:`int`
+:return: a matrix of shape :math:`M,N`
+:rtype: :class:`.lmatrix`
+    """
+#-------------------------------------------------------------------------------
+    if isinstance(start,str): start = onehot(self.state_names._[start],self.N)
+    elif isinstance(start,int): start = onehot(start,self.N)
+    m = self.initial(start,size)
+    b = zeros((size,1))
+    return lmatrix(m,b,self.max_normalise)
+
+#-------------------------------------------------------------------------------
+  def run(self,batch,weights):
+    r"""
+Runs a batch of sequences in log domain. The sequences in the batch all have the same length :math:`L`. The initial weights *weights* are modified inplace.
+
+:param batch: the symbol sequence to evaluate as an :class:`int` matrix of shape :math:`L,M` where :math:`M` is the number of samples
+:type batch: :class:`numpy.ndarray`
+:param weights: state weights as a log-domain matrix of shape :math:`M,N` where :math:`N` is the number of states
+:type weights: :class:`.lmatrix`
+    """
+#-------------------------------------------------------------------------------
+    for csymb in batch:
+      for c in unique(csymb): sel=csymb==c; weights[sel] = weights[sel]@self.W[c]
+
+#-------------------------------------------------------------------------------
+  def __matmul__(self,other):
+#-------------------------------------------------------------------------------
+    if not isinstance(other,WFSA): raise ValueError('Unsupported types for @: \'{}\' and \'{}\''.format(self.__class__,other.__class__))
+    if other.mtype != self.mtype: raise ValueError('Inconsistent matrix types for @: \'{}\' and \'{}\''.format(self.mtype,other.mtype))
+    product = self.product
+    def intersect():
+      for cname,w in zip(self.symb_names,self.W):
+        c = other.symb_names._.get(cname)
+        if c is None:
+          if other.template is not None: yield cname,product(w,other.template)
+        else: yield cname,product(w,other.W[c])
+      if self.template is not None:
+        for cname,w in zip(other.symb_names,other.W):
+          if self.symb_names._.get(cname) is None: yield cname,product(self.template,w)
+    N = self.N*other.N
+    template = None
+    if self.template is not None and other.template is not None:
+      template = product(self.template,other.template)
+    symb_names, W = zip(*intersect())
+    state_names = tuple('{}.{}'.format(s1,s2) for s1 in self.state_names for s2 in other.state_names)
+    return WFSA(W,symb_names=symb_names,state_names=state_names,template=template,check=False)
+
+#-------------------------------------------------------------------------------
+  def default_state_names(self): return [str(n) for n in range(self.N)]
+  def default_symb_names(self): return [chr(x+97) for x in range(self.n)]
+#-------------------------------------------------------------------------------
