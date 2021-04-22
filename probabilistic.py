@@ -14,17 +14,17 @@ Available types and functions
 -----------------------------
 """
 
-import logging
-logger = logging.getLogger(__name__)
-import collections
-from numpy import ndarray, all, allclose, sum, array, eye, transpose, zeros, bincount, empty, nonzero, log, exp, unique, argmax, average, ceil, stack, amin, amax
+import logging; logger = logging.getLogger(__name__)
+from numpy import ndarray, all, allclose, sum, array, eye, zeros, bincount, empty, nonzero, argmax, average, ceil, stack, amin, amax
 from numpy.random import choice
 from numpy.linalg import solve
 from scipy.special import xlogy
 from scipy.sparse import csr_matrix, eye as speye
 from scipy.sparse.linalg import spsolve
 from .core import WFSA
-from .util import NameMap, Sample, onehot
+from .util import Sample, onehot
+
+__all__ = 'PFSA',
 
 #===============================================================================
 class PFSA (WFSA):
@@ -88,7 +88,7 @@ Methods:
           f = argmax(a)
           if not sum(wbar[f]!=w[f]): stopc.append((c,f))
       if check2:
-        if len(stopc)!=1: raise ValueError('Stop symbol not found or ambiguous: {}'.format(stopc))
+        if len(stopc)!=1: raise ValueError(f'Stop symbol not found or ambiguous: {stopc}')
       (stop,final), = stopc
       logger.info('Inferred stop symbol and final state: %s %s',self.symb_names[stop],self.state_names[final])
     else:
@@ -110,7 +110,7 @@ Methods:
       self.N = N
       self.W = tuple(w[q,:][:,q] for w in self.W)
       wbar = wbar[q,:][:,q]
-      self.state_names = NameMap(array(self.state_names)[q])
+      self.state_names = tuple(array(self.state_names)[q])
       final = sum(q[:final])
     # set up of pfsa specific attributes
     self.stop = stop
@@ -186,7 +186,7 @@ Returns the expected length of strings under the distribution of this automaton 
     if r is None:
       W = self.Wbar-self.W[self.stop]
       r = self.expected_length_ = self.solve(self.eye(self.N)-W,sum(W,axis=1))
-    return r if start is None else r[self.state_names._[start] if isinstance(start,str) else start]
+    return r if start is None else r[self.state_names.index(start) if isinstance(start,str) else start]
 
 #-------------------------------------------------------------------------------
   entropy_ = None
@@ -205,7 +205,7 @@ Returns the entropy of the distribution of this model with initial state given b
       r = self.entropy_ = zeros(self.N)
       u = sum(ent(sum(w,axis=1)) for w in self.W)[self.nonfinal]
       r[self.nonfinal] = self.solve((self.eye(self.N)-self.Wbar)[self.nonfinal,:][:,self.nonfinal],u)
-    return r if start is None else r[self.state_names._[start] if isinstance(start,str) else start]
+    return r if start is None else r[self.state_names.index(start) if isinstance(start,str) else start]
 
 #-------------------------------------------------------------------------------
   def sample(self,size,start,store=None):
@@ -221,7 +221,7 @@ Returns a sample of this automaton. If *start* is specified as a single state, i
 #-------------------------------------------------------------------------------
     # scount: previous state counts
     scount = None
-    if isinstance(start,str): start = self.state_names._[start]
+    if isinstance(start,str): start = self.state_names.index(start)
     elif not isinstance(start,int):
       start = choice(self.N,size,p=start)
       scount = bincount(start,minlength=self.N)
@@ -275,5 +275,5 @@ Returns a copy of this automaton as a :class:`.PFSA`.
 :param stop,check2: same role as in the :class:`.PFSA` constructor
   """
 #===============================================================================
-  return PFSA([w.copy() for w in self.W],state_names=self.state_names[:],symb_names=self.symb_names[:],check=False,stop=stop,check2=check2)
+  return PFSA([w.copy() for w in self.W],state_names=self.state_names,symb_names=self.symb_names,check=False,stop=stop,check2=check2)
 WFSA.toPFSA = toPFSA

@@ -14,16 +14,16 @@ Available types and functions
 -----------------------------
 """
 
-import logging
-logger = logging.getLogger(__name__)
+import logging; logger = logging.getLogger(__name__)
 import re,collections,pickle
 from contextlib import contextmanager
-from weakref import WeakValueDictionary
 from pathlib import Path
-from numpy import all, sum, cumsum, array, ndarray, zeros, nonzero, log, seterr, arange, concatenate, argmax, amax, tile, ceil, log10
+from numpy import sum, cumsum, ndarray, zeros, nonzero, log, seterr, arange, concatenate, tile, ceil, log10
 from numpy import load as npload, save as npsave
 from numpy.random import choice
 from scipy.sparse import csr_matrix
+
+__all__ = 'Sample', 'FileBatch', 'csra_matrix'
 
 #===============================================================================
 class lmatrix:
@@ -50,7 +50,7 @@ Matrix in log domain. Support only matrix multiplication on the right.
 :rtype: :class:`numpy.ndarray`
     """
     with seterr_c(divide='ignore'): return log(toarray(self.m))+self.b
-  def __repr__(self): return '{}*exp{}'.format(self.m,self.b)
+  def __repr__(self): return f'{self.m}*exp{self.b}'
 
 #===============================================================================
 class csra_matrix (csr_matrix):
@@ -78,7 +78,7 @@ Same arguments as the :class:`scipy.sparse.csr_matrix` constructor, with additio
     return csr_matrix((self.data,self.indices,self.indptr),self.shape)
   def __matmul__(self,other):
     if isinstance(other,csra_matrix):
-      if self.shape[1] != other.shape[0]: raise ValueError('Inconsistent shapes for matrix multiplication: {} {}'.format(self.shape,other.shape))
+      if self.shape[1] != other.shape[0]: raise ValueError(f'Inconsistent shapes for matrix multiplication: {self.shape} {other.shape}')
       return csra_matrix((self.data*other.data[self.indices],other.indices[self.indices],self.indptr),(self.shape[0],other.shape[1]))
     else: # looses csra property...
       return self.neutralise().__matmul__(other)
@@ -100,8 +100,8 @@ Same arguments as the :class:`scipy.sparse.csr_matrix` constructor, with additio
     else: # looses csra property...
       return self.neutralise().__getitem__(key)
   def __setitem__(self,key,val): # works only in a very specific case
-    if not (isinstance(val,csra_matrix)): raise TypeError('Unsupported type for setitem: {} and {}'.format(self.__class__,val.__class__))
-    if not(isinstance(key,ndarray) and key.dtype==bool): raise TypeError('Unsupported key type for setitem (only boolean masks): {}'.format(key.__class__))
+    if not (isinstance(val,csra_matrix)): raise TypeError(f'Unsupported type for setitem: {self.__class__} and {val.__class__}')
+    if not(isinstance(key,ndarray) and key.dtype==bool): raise TypeError(f'Unsupported key type for setitem (only boolean masks): {key.__class__}')
     self.indices[key],self.data[key] = val.indices,val.data
   def __add__(self,other): return self.neutralise().__add__(other)
   def __radd__(self,other): return self.neutralise().__radd__(other)
@@ -167,9 +167,9 @@ Closes this sample. Reorders all the batches so that the items of a batch having
       for sbatch,nsize,ind in self.content:
         sbatch[...] = sbatch[:,ind]
         yield sbatch,nsize
-    if self.closed: return self
-    self.content = tuple(close())
-    self.closed = True
+    if not self.closed:
+      self.content = tuple(close())
+      self.closed = True
     return self
 
 #-------------------------------------------------------------------------------
@@ -215,7 +215,7 @@ Instances of this class provide a file based store function for sample batches.
     elif not isinstance(path,Path): raise TypeError('Argument must be of type Union[str,Path]')
     self.path = path
     self.base = path/'batch_'
-    self.getpath = lambda n,path=path: path/'batch_{:03x}.npy'.format(n)
+    self.getpath = lambda n,path=path: path/f'batch_{n:03x}.npy'
     if self.base.exists():
       if clear: self.clear()
     else:
@@ -259,7 +259,7 @@ Returns a closed :class:`Sample` instance.
 #===============================================================================
 class WFSABrowsePlugin:
   r"""
-Some utilities to browse automata. Kept separate as a plugin for readbility.
+Some utilities to browse automata. Kept separate as a plugin for readability.
   """
 #===============================================================================
 
@@ -286,20 +286,20 @@ Returns an html table of the transitions. Use :func:`IPython.display.display` fo
           for s,n in enumerate(self.state_names): yield B(n),dict(style=dfstyle+hdstyle+empfinal(s)+vhdstyle)
       def row(s,n):
         yield B(n),dict(style=dfstyle+hdstyle+empfinal(s))
-        for s2,x in enumerate(toarray(wbar[s]).squeeze()): yield ('{:.2}'.format(x) if x else ''),dict(title=detail(x,*((self.symb_names[c],w[s,s2]) for c,w in enumerate(self.W))),style=dfstyle+cstyle)
+        for s2,x in enumerate(toarray(wbar[s]).squeeze()): yield (f'{x:.2}' if x else ''),dict(title=detail(x,*((self.symb_names[c],w[s,s2]) for c,w in enumerate(self.W))),style=dfstyle+cstyle)
         if self.template is not None:
           yield B(n),dict(style=dfstyle+hdstyle+empfinal(s)+'border-left:thick solid black;')
-          for s2,x in enumerate(toarray(self.template[s]).squeeze()): yield ('{:.2}'.format(x) if x else ''), dict(title=detail(x),style=dfstyle+cstyle)
+          for s2,x in enumerate(toarray(self.template[s]).squeeze()): yield (f'{x:.2}' if x else ''),dict(title=detail(x),style=dfstyle+cstyle)
       yield hdr()
       for s,n in enumerate(self.state_names): yield row(s,n)
     def detail(x,*l):
-      return '{:.5}'.format(x)+'\n'+'\n'.join('{} {:.5}'.format(c,v) for c,v in l if v)
+      return f'{x:.5}\n'+'\n'.join(f'{c} {v:.5}' for c,v in l if v)
     def empfinal(s): return 'background-color: darkblue;' if hasattr(self,'final') and s==self.final else ''
     def td(x,atts=None):
       if atts is None: atts = {}
       atts.setdefault('style',dfstyle)
       return TD(x,**atts)
-    info = '🛈',dict(title='{} states, {} symbols, {} transitions\nmtype: {}'.format(self.N,self.n,sum([sum(w!=0) for w in self.W]),self.mtype),style=dfstyle+'background-color:white;color:blue;')
+    info = '🛈',dict(title=f'{self.N} states, {self.n} symbols, {sum([sum(w!=0) for w in self.W])} transitions\nmtype: {self.mtype}',style=dfstyle+'background-color:white;color:blue;')
     if self.N<=self.maxN:
       wbar = 0.
       for w in self.W: wbar += w
@@ -368,7 +368,7 @@ Draws this automaton as a network (not so great)
 
 #-------------------------------------------------------------------------------
   @classmethod
-  def from_str(klass,descr,sparse=False,sep='\n',pat=re.compile(r'(\w+|)->(\w+|)\s+(\S|)\s+([0-9.]+)')):
+  def from_str(cls,descr,sparse=False,sep='\n',pat=re.compile(r'(\w+|)->(\w+|)\s+(\S|)\s+([0-9.]+)')):
     r"""
 Returns a :class:`.WFSA` instance described by parameter *descr*, which must be a string in a simple syntax. This is a class method and the created instance is of the class from which it is invoked. For example, a trivial probabilistic automaton for strings of geometric lengths over a singleton alphabet can be specified as:
 
@@ -381,37 +381,22 @@ Returns a :class:`.WFSA` instance described by parameter *descr*, which must be 
    ''')
     """
 #-------------------------------------------------------------------------------
-    def add(x,L,D):
-      if not x in D: D[x] = len(L); L.append(x)
+    def add(x,D):
+      if not x in D: D[x] = len(D)
     L = [pat.fullmatch(x.strip()).groups() for x in descr.strip().split(sep)]
-    Lstate,Lsymb = [],[]; Dstate,Dsymb = {},{}
-    for x in L: add(x[0],Lstate,Dstate); add(x[2],Lsymb,Dsymb)
+    Dstate,Dsymb = {},{}
+    for x in L: add(x[0],Dstate); add(x[2],Dsymb)
     notr = [x[1] for x in L if x[1] not in Dstate]
-    if notr: raise ValueError('Some states have no transition: {}'.format(notr))
-    N = len(Lstate)
-    W = tuple(zeros((N,N)) for symb in Lsymb)
-    for sfrom,sto,symb,w in L:
-      W[Dsymb[symb]][Dstate[sfrom],Dstate[sto]] = float(w)
+    if notr: raise ValueError(f'Some states have no transition: {notr}')
+    N = len(Dstate)
+    W = zeros((len(Dsymb),N,N))
+    for sfrom,sto,symb,w in L: W[Dsymb[symb],Dstate[sfrom],Dstate[sto]] = float(w)
     if sparse: W = [csra_matrix.initial(w) for w in W]
-    return klass(W,state_names=Lstate,symb_names=Lsymb)
+    return cls(tuple(W),state_names=tuple(Dstate),symb_names=tuple(Dsymb))
 
 #===============================================================================
 # Miscelanous
 #===============================================================================
-
-class NameMap (collections.abc.Sequence):
-  r"""
-A class pairing a list of distinct strings (made immutable) and a reverse dictionary from the strings to the indices in the list. The reverse dictionary is accessible through attribute :attr:`_`.
-
-:param l: the list of strings
-:type l: :class:`Iterable[str]`
-  """
-  def __init__(self,l):
-    self.direct = l = tuple(l)
-    self.reverse = self._ = dict((x,i) for i,x in enumerate(l))
-  def __getitem__(self,slice): return self.direct[slice]
-  def __len__(self): return len(self.direct)
-  def __repr__(self): return repr(self.direct)
 
 @contextmanager
 def seterr_c(**ka):

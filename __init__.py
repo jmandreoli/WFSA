@@ -18,6 +18,6 @@ Available types and functions:
 :class:`.WFSA`, :class:`.PFSA`, :class:`.Sample`, :class:`.FileBatch`, :class:`.csra_matrix`
 """
 
-from .core import WFSA
-from .probabilistic import PFSA
-from .util import Sample, FileBatch, csra_matrix
+from .core import *
+from .probabilistic import *
+from .util import *

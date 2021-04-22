@@ -14,11 +14,12 @@ Available types and functions
 -----------------------------
 """
 
-import logging
-logger = logging.getLogger(__name__)
-from numpy import ndarray, all, sum, array, arange, zeros, ones, log, unique, amin, amax, empty
+import logging; logger = logging.getLogger(__name__)
+from numpy import ndarray, all, sum, zeros, ones, unique, amin, amax, empty, einsum
 from scipy.sparse import csr_matrix, vstack as spvstack
-from .util import WFSABrowsePlugin, NameMap, lmatrix, csra_matrix, onehot
+from .util import WFSABrowsePlugin, lmatrix, csra_matrix, onehot
+
+__all__ = 'WFSA',
 
 #===============================================================================
 class WFSA (WFSABrowsePlugin):
@@ -41,7 +42,7 @@ An additional transition matrix (called a template) can optionally be specified 
 :param check: whether to make verifications at initialisation (use :const:`False` when already verified upstream)
 :type check: :class:`bool`
 
-Attributes: :attr:`W` (cast as a :class:`tuple`), :attr:`template`, :attr:`symb_names`, :attr:`state_names` (the latter two cast as :class:`.NameMap`) and
+Attributes: :attr:`W` (cast as a :class:`tuple`), :attr:`template`, :attr:`symb_names`, :attr:`state_names` and
 
 .. attribute:: mtype
 
@@ -71,11 +72,11 @@ Methods:
     base = W[0] if template is None else template
     if check:
       N,N_ = base.shape
-      if not isinstance(base,(ndarray,csr_matrix)): raise ValueError('Unsupported matrix type {}'.format(base.__class__))
+      if not isinstance(base,(ndarray,csr_matrix)): raise ValueError(f'Unsupported matrix type {base.__class__}')
       if any([type(w)!=type(base) for w in W]): raise ValueError('Transition matrices must all be of the same type')
       if N!=N_ or any([w.shape!=(N,N) for w in W]): raise ValueError('Transition matrices must all be of the same square shape')
       for c,w in enumerate(W):
-        if amin(w)<0.: raise ValueError('Negative transition weight in symbol: {}'.format(c))
+        if amin(w)<0.: raise ValueError(f'Negative transition weight in symbol: {c}')
       if template is not None and amin(template)<0.: raise ValueError('Negative transition weight in template')
       if state_names is not None and (len(state_names)!=N or not all([isinstance(x,str) for x in state_names])): raise ValueError('State name list must contain strings and match state dimension')
       if symb_names is not None and (len(symb_names)!=len(W) or not all([isinstance(x,str) for x in symb_names])): raise ValueError('Symbol name list must contain strings and match alphabet length')
@@ -84,10 +85,8 @@ Methods:
     self.n = len(W)
     self.N = base.shape[0]
     self.mtype = type(base)
-    if state_names is None: state_names = self.default_state_names()
-    self.state_names = NameMap(state_names)
-    if symb_names is None: symb_names = self.default_symb_names()
-    self.symb_names = NameMap(symb_names)
+    self.state_names = self.default_state_names() if state_names is None else state_names
+    self.symb_names = self.default_symb_names() if symb_names is None else symb_names
 
 #-------------------------------------------------------------------------------
   def init_type(self):
@@ -148,7 +147,7 @@ Returns an initial state-weight assignment for method :meth:`run` as a log-domai
 :rtype: :class:`.lmatrix`
     """
 #-------------------------------------------------------------------------------
-    if isinstance(start,str): start = onehot(self.state_names._[start],self.N)
+    if isinstance(start,str): start = onehot(self.state_names.index(start),self.N)
     elif isinstance(start,int): start = onehot(start,self.N)
     m = self.initial(start,size)
     b = zeros((size,1))
@@ -171,27 +170,26 @@ Runs a batch of sequences in log domain. The sequences in the batch all have the
 #-------------------------------------------------------------------------------
   def __matmul__(self,other):
 #-------------------------------------------------------------------------------
-    if not isinstance(other,WFSA): raise ValueError('Unsupported types for @: \'{}\' and \'{}\''.format(self.__class__,other.__class__))
-    if other.mtype != self.mtype: raise ValueError('Inconsistent matrix types for @: \'{}\' and \'{}\''.format(self.mtype,other.mtype))
+    if not isinstance(other,WFSA): raise ValueError(f'Unsupported types for @: \'{self.__class__}\' and \'{other.__class__}\'')
+    if other.mtype != self.mtype: raise ValueError(f'Inconsistent matrix types for @: \'{self.mtype}\' and \'{other.mtype}\'')
     product = self.product
     def intersect():
       for cname,w in zip(self.symb_names,self.W):
-        c = other.symb_names._.get(cname)
-        if c is None:
+        try: cind = other.symb_names.index(cname)
+        except ValueError:
           if other.template is not None: yield cname,product(w,other.template)
-        else: yield cname,product(w,other.W[c])
+        else: yield cname,product(w,other.W[cind])
       if self.template is not None:
         for cname,w in zip(other.symb_names,other.W):
-          if self.symb_names._.get(cname) is None: yield cname,product(self.template,w)
-    N = self.N*other.N
+          if cname not in self.symb_names: yield cname,product(self.template,w)
     template = None
     if self.template is not None and other.template is not None:
       template = product(self.template,other.template)
     symb_names, W = zip(*intersect())
-    state_names = tuple('{}.{}'.format(s1,s2) for s1 in self.state_names for s2 in other.state_names)
+    state_names = tuple(f'{s1}.{s2}' for s1 in self.state_names for s2 in other.state_names)
     return WFSA(W,symb_names=symb_names,state_names=state_names,template=template,check=False)
 
 #-------------------------------------------------------------------------------
-  def default_state_names(self): return [str(n) for n in range(self.N)]
-  def default_symb_names(self): return [chr(x+97) for x in range(self.n)]
+  def default_state_names(self): return tuple(str(n) for n in range(self.N))
+  def default_symb_names(self): return tuple(chr(x+97) for x in range(self.n))
 #-------------------------------------------------------------------------------
