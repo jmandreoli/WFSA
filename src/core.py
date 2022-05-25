@@ -4,15 +4,6 @@
 # Language:             python
 # Purpose:              Implementation of Weighted Finite State Automata
 #
-r"""
-:mod:`WFSA.core` --- Weighted Finite State Automata
-===================================================
-
-This module provides core functionalities of Weighted FSA.
-
-Available types and functions
------------------------------
-"""
 
 import logging; logger = logging.getLogger(__name__)
 from numpy import ndarray, all, sum, zeros, ones, unique, amin, amax, empty, einsum

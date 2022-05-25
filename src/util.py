@@ -4,15 +4,6 @@
 # Language:             python
 # Purpose:              Utilities for Finite State Automata
 #
-r"""
-:mod:`WFSA.util` --- Utilities
-==============================
-
-This module provides utilities supporting FSA operations.
-
-Available types and functions
------------------------------
-"""
 
 import logging; logger = logging.getLogger(__name__)
 import re,collections,pickle

@@ -4,15 +4,6 @@
 # Language:             python
 # Purpose:              Implementation of Probabilistic Finite State Automata
 #
-r"""
-:mod:`WFSA.probabilistic` --- Probabilistic Finite State Automata
-=================================================================
-
-This module provides core functionalities for Probabilistic FSA.
-
-Available types and functions
------------------------------
-"""
 
 import logging; logger = logging.getLogger(__name__)
 from numpy import ndarray, all, allclose, sum, array, eye, zeros, bincount, empty, nonzero, argmax, average, ceil, stack, amin, amax

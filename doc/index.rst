@@ -6,15 +6,11 @@
 Welcome to WFSA's documentation!
 ================================
 
-.. automodule:: WFSA
-  :members:
-  :member-order: bysource
-  :show-inheritance:
-
 .. toctree::
    :maxdepth: 2
    :caption: Contents:
 
+   mod_init.rst
    mod_core.rst
    mod_probabilistic.rst
    mod_util.rst
