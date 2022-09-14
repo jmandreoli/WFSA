@@ -6,6 +6,8 @@
 #
 
 import logging; logger = logging.getLogger(__name__)
+from typing import Optional, Union, Callable, Dict, Any, Sequence
+from functools import cached_property
 from numpy import ndarray, all, sum, zeros, ones, unique, amin, amax, empty, einsum
 from scipy.sparse import csr_matrix, vstack as spvstack
 from .util import WFSABrowsePlugin, lmatrix, csra_matrix, onehot
@@ -22,33 +24,23 @@ WFSA intersection is supported through operator ``@``. It is essentially commuta
 
 An additional transition matrix (called a template) can optionally be specified in a WFSA. It is used when intersecting automata with different alphabets. Each time a symbol is present in one operand, but not in the other, the template of the second operand, if present, is used as default transition matrix for that symbol in the second operand. Also, if both operands have a template, the intersection also has a template, computed as for the other transition matrices.
 
-:param W: a list of transition (square) matrices with the same shape and type, one for each symbol in the alphabet
-:type W: :class:`Union[Iterable[numpy.ndarray],Iterable[scipy.sparse.csr_matrix],Iterable[csra_matrix]]`
-:param template: a transition (square) matrix of same shape and type as those in *W*
-:type template: :class:`Union[NoneType,numpy.ndarray,scipy.sparse.csr_matrix,csra_matrix]`
-:param state_names: the list of names of the states (indices in each transition matrix)
-:type state_names: Iterable[:class:`str`]
-:param symb_names: the list of names of the symbols (indices in the list of transition matrices)
-:type symb_names: Iterable[:class:`str`]
-:param check: whether to make verifications at initialisation (use :const:`False` when already verified upstream)
-:type check: :class:`bool`
-
-Attributes: :attr:`W` (cast as a :class:`tuple`), :attr:`template`, :attr:`symb_names`, :attr:`state_names` and
-
-.. attribute:: mtype
-
-   The common type of all the transition matrices (one of the supported types)
-
-.. attribute:: N
-
-   The number of states
-
-.. attribute:: n
-
-   The number of symbols in the alphabet
-
 Methods:
   """
+
+  mtype: type
+  r"""The common type of all the transition matrices (one of the supported types)"""
+  N: int
+  r"""The number of states"""
+  n: int
+  r"""The number of symbols in the alphabet"""
+  W: Union[tuple[ndarray,...],tuple[csr_matrix,...],tuple[csra_matrix,...]]
+  r"""a list of transition (square) matrices with the same shape and type, one for each symbol in the alphabet"""
+  template: Optional[Union[ndarray,csr_matrix,csra_matrix]]
+  r"""a transition (square) matrix of same shape and type as those in :attr:`W`"""
+  symb_names: tuple[str,...]
+  r"""the list of names of the symbols (indices in the list of transition matrices)"""
+  state_names: tuple[str,...]
+  r"""the list of names of the states (indices in each transition matrix)"""
 
 #-------------------------------------------------------------------------------
   def __init__(self,*a,**ka):
@@ -57,8 +49,10 @@ Methods:
     self.init_type()
 
 #-------------------------------------------------------------------------------
-  def init_struct(self,W,template=None,state_names=None,symb_names=None,check=True):
+  def init_struct(self,W:Union[Sequence[ndarray],Sequence[csr_matrix],Sequence[csra_matrix]],template:Optional[Union[ndarray,csr_matrix,csra_matrix]]=None,state_names:Optional[Sequence[str]]=None,symb_names:Optional[Sequence[str]]=None,check:bool=True):
+    r"""Initialises the structure of this WFSA. If *check* is :const:`True`, a number of consistency checks are performed on the arguments (set to :const:`False` if already checked at invocation)."""
 #-------------------------------------------------------------------------------
+
     W = tuple(W)
     base = W[0] if template is None else template
     if check:
@@ -76,11 +70,12 @@ Methods:
     self.n = len(W)
     self.N = base.shape[0]
     self.mtype = type(base)
-    self.state_names = self.default_state_names() if state_names is None else state_names
-    self.symb_names = self.default_symb_names() if symb_names is None else symb_names
+    self.state_names = self.default_state_names() if state_names is None else tuple(state_names)
+    self.symb_names = self.default_symb_names() if symb_names is None else tuple(symb_names)
 
 #-------------------------------------------------------------------------------
   def init_type(self):
+    r"""Initialises the types of this WFSA"""
 #-------------------------------------------------------------------------------
     # Initialisation of special methods dependent on matrix type
     if issubclass(self.mtype,ndarray):
@@ -111,31 +106,25 @@ Methods:
     self.product,self.initial,self.max_normalise = product,initial,max_normalise
 
 #-------------------------------------------------------------------------------
-  deterministic_ = None
-  @property
+  @cached_property
   def deterministic(self):
     r"""
 Returns whether this automaton is deterministic.
     """
 #-------------------------------------------------------------------------------
-    r = self.deterministic_
-    if r is None:
-      r = self.deterministic_ = all([all(sum(w!=0,axis=1)<2) for w in self.W])
-      if r and self.N>10 and not issubclass(self.mtype,csra_matrix):
-        logger.warning('Deterministic automata with type %s may be inefficient. Use type csra_matrix instead.',self.mtype)
+    r = all([all(sum(w!=0,axis=1)<2) for w in self.W])
+    if r and self.N>10 and not issubclass(self.mtype,csra_matrix):
+      logger.warning('Deterministic automata with type %s may be inefficient. Use type csra_matrix instead.',self.mtype)
     return r
 
 #-------------------------------------------------------------------------------
-  def initialise(self,start,size):
+  def initialise(self,start:Union[str,int,ndarray],size:int)->lmatrix:
     r"""
 Returns an initial state-weight assignment for method :meth:`run` as a log-domain matrix. If *start* is specified as a single state, it is taken to be the one-hot assignment to that state.
 
 :param start: an initial state-weight assignment as a vector of length :math:`N`, the number of states in this automaton
-:type start: :class:`Union[str,int,numpy.ndarray]`
 :param size: number :math:`M` of samples
-:type size: :class:`int`
 :return: a matrix of shape :math:`M,N`
-:rtype: :class:`.lmatrix`
     """
 #-------------------------------------------------------------------------------
     if isinstance(start,str): start = onehot(self.state_names.index(start),self.N)
@@ -145,14 +134,12 @@ Returns an initial state-weight assignment for method :meth:`run` as a log-domai
     return lmatrix(m,b,self.max_normalise)
 
 #-------------------------------------------------------------------------------
-  def run(self,batch,weights):
+  def run(self,batch:ndarray,weights:lmatrix):
     r"""
 Runs a batch of sequences in log domain. The sequences in the batch all have the same length :math:`L`. The initial weights *weights* are modified inplace.
 
 :param batch: the symbol sequence to evaluate as an :class:`int` matrix of shape :math:`L,M` where :math:`M` is the number of samples
-:type batch: :class:`numpy.ndarray`
 :param weights: state weights as a log-domain matrix of shape :math:`M,N` where :math:`N` is the number of states
-:type weights: :class:`.lmatrix`
     """
 #-------------------------------------------------------------------------------
     for csymb in batch:
@@ -181,6 +168,6 @@ Runs a batch of sequences in log domain. The sequences in the batch all have the
     return WFSA(W,symb_names=symb_names,state_names=state_names,template=template,check=False)
 
 #-------------------------------------------------------------------------------
-  def default_state_names(self): return tuple(str(n) for n in range(self.N))
-  def default_symb_names(self): return tuple(chr(x+97) for x in range(self.n))
+  def default_state_names(self)->tuple[str,...]: return tuple(str(n) for n in range(self.N))
+  def default_symb_names(self)->tuple[str,...]: return tuple(chr(x+97) for x in range(self.n))
 #-------------------------------------------------------------------------------

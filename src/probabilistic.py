@@ -6,6 +6,7 @@
 #
 
 import logging; logger = logging.getLogger(__name__)
+from typing import Optional, Union, Callable, Dict, Any, Sequence
 from numpy import ndarray, all, allclose, sum, array, eye, zeros, bincount, empty, nonzero, argmax, average, ceil, stack, amin, amax
 from numpy.random import choice
 from numpy.linalg import solve
@@ -22,73 +23,62 @@ class PFSA (WFSA):
   r"""
 An instance of this class is a Probabilistic Finite State Automata. It is also an instance of WFSA. It must have a unique singleton attractor, which is taken to be the final state. There must be a unique transition from the final state, and it emits the stop symbol. States from which the final state is not reachable are pruned. All the parameters of WFSA are honored, as well as
 
-:param stop: the index or name of the stop symbol (optional)
-:type stop: :class:`Union[NoneType,str,int]`
-:param check2: whether to make PFSA specific verifications at initialisation
-:type check2: :class:`bool`
-
-Attributes (in addition to those of :class:`.WFSA`):
-
-.. attribute:: stop
-
-   The index of the stop symbol, guessed if not provided or :const:`None`
-
-.. attribute:: Wbar
-
-   The global transition matrix (sum of the transition matrices of all the symbols)
-
-.. attribute:: final
-
-   The index of the final state, inferred from the stop symbol or guessed together with it
-
-.. attribute:: nonfinal
-
-   A filter (1D :class:`numpy.ndarray` of type :class:`bool`) to select all the states except the final one
-
-.. attribute:: normaliser
-
-   The normaliser to apply to an initial state weight vector before turning it into a distribution
-
 Methods:
   """
 #===============================================================================
 
+  stop: int
+  r"""The index of the stop symbol"""
+  Wbar: ndarray
+  r"""The global transition matrix (sum of the transition matrices of all the symbols)"""
+  final: int
+  r"""The index of the final state"""
+  nonfinal: ndarray
+  r"""A filter (1D array of type :class:`bool`) to select all the states except the final one"""
+  normaliser: Optional[ndarray] = None
+  r"""The normaliser to apply to an initial state weight vector before turning it into a distribution"""
+
 #-------------------------------------------------------------------------------
-  def init_struct(self,*a,stop=None,check2=True,**ka):
+  def init_struct(self,*a,stop:Optional[str|int]=None,check2=True,**ka):
+    r"""
+Guesses the stop symbol if not provided or :const:`None`. Also guesses the final state. If *check2* is :const:`True`, makes PFSA specific verifications at initialisation.
+    """
 #-------------------------------------------------------------------------------
     super().init_struct(*a,**ka)
     # matrix type specific functions needed here
     if issubclass(self.mtype,ndarray):
-      def normalise(a,z):
+      def normalise(a:ndarray,z:ndarray):
         for z_,a_ in zip(z,a): a_ *= z_/z
       solve_,eye_ = solve,eye
     else:
-      def normalise(a,z):
+      def normalise(a:csr_matrix,z:csr_matrix):
         for i,(k,k_) in enumerate(zip(a.indptr[:-1],a.indptr[1:])):
           a.data[k:k_] *= z[a.indices[k:k_]]/z[i]
       solve_,eye_ = spsolve,speye
     # computation of the global transition matrix
-    wbar = 0.
+    wbar:Union[ndarray,csr_matrix] = 0.
     for w in self.W: wbar += w
     # determination of stop symbol and final state
+    stopn:int
+    final:int
     if stop is None:
-      stopc = []
+      stopc:list[tuple[int,int]] = []
       for c,w in enumerate(self.W):
         a = sum(w,axis=0)!=0
         if sum(a)==1:
-          f = argmax(a)
+          f = int(argmax(a))
           if not sum(wbar[f]!=w[f]): stopc.append((c,f))
       if check2:
         if len(stopc)!=1: raise ValueError(f'Stop symbol not found or ambiguous: {stopc}')
-      (stop,final), = stopc
-      logger.info('Inferred stop symbol and final state: %s %s',self.symb_names[stop],self.state_names[final])
+      (stopn,final), = stopc
+      logger.info('Inferred stop symbol and final state: %s %s',self.symb_names[stopn],self.state_names[final])
     else:
-      if isinstance(stop,str): stop = self.symb_names._[stop]
-      a = sum(self.W[stop],axis=0)!=0
-      final = argmax(a)
+      stopn = self.symb_names.index(stop) if isinstance(stop,str) else stop
+      a = sum(self.W[stopn],axis=0)!=0
+      final = int(argmax(a))
       if check2:
         if sum(a)!=1: raise ValueError('Final state not found or ambiguous')
-        if sum(wbar[final]!=self.W[stop][final]): raise ValueError('Non stop symbol transition found from final state')
+        if sum(wbar[final]!=self.W[stopn][final]): raise ValueError('Non stop symbol transition found from final state')
       logger.info('Inferred final state: %s',self.state_names[final])
     # pruning of states which cannot reach the final state
     wbar_b = wbar!=0; wbar_b += eye_(self.N,dtype=bool)
@@ -96,20 +86,19 @@ Methods:
     for _ in range(self.N): q[...] = wbar_b@q
     if not all(q):
       # if actual pruning, recompute everything concerning states
-      N = sum(q)
+      N:int = int(sum(q))
       logger.info('Pruning unreachable states: %s/%s',self.N-N,self.N)
       self.N = N
       self.W = tuple(w[q,:][:,q] for w in self.W)
       wbar = wbar[q,:][:,q]
       self.state_names = tuple(array(self.state_names)[q])
-      final = sum(q[:final])
+      final = int(sum(q[:final]))
     # set up of pfsa specific attributes
-    self.stop = stop
     self.Wbar = wbar
+    self.stop = stopn
     self.final = final
     self.nonfinal = nonfinal = ~onehot(final,self.N,dtype=bool)
     # normalisation of weights
-    self.normaliser = None
     if not allclose(sum(wbar,axis=1),1.):
       wnf = wbar[nonfinal]
       self.normaliser = z = empty(self.N)
@@ -125,18 +114,18 @@ Methods:
 #-------------------------------------------------------------------------------
     super().init_type()
     # Special methods dependent on matrix type
-    wbar = self.Wbar
     if issubclass(self.mtype,ndarray):
+      wbar:ndarray = self.Wbar
       sample_next = lambda s,count,N=self.N,wbar=wbar: choice(N,count,p=wbar[s])
-      wnorm = stack(self.W).transpose(1,2,0)
+      wnorm:ndarray = stack(self.W).transpose(1,2,0)
       sel = wbar!=0
       wnorm[sel,:] /= wbar[sel,None]
       sample_symbol = lambda s,s2,count,n=self.n,wnorm=wnorm: choice(n,count,p=wnorm[s,s2])
       eye_,solve_ = eye,solve
     elif issubclass(self.mtype,csr_matrix):
-      wbar = self.Wbar
+      wbar:csr_matrix = self.Wbar
       def sample_next(s,count,wbar=wbar): a = wbar[s]; return choice(a.indices,count,p=a.data)
-      wnorm = {}
+      wnorm:Dict[tuple[int,int],ndarray] = {}
       for i,(k,k_) in enumerate(zip(wbar.indptr[:-1],wbar.indptr[1:])):
         for j,v in zip(wbar.indices[k:k_],wbar.data[k:k_]):
           if v: wnorm[i,j] = array([w[i,j]/v for w in self.W])
@@ -145,7 +134,7 @@ Methods:
     self.sample_next,self.sample_symbol,self.eye,self.solve = sample_next,sample_symbol,eye_,solve_
 
 #-------------------------------------------------------------------------------
-  def logproba(self,sample,start):
+  def logproba(self,sample:Sample,start:Union[str,int,ndarray]):
     r"""
 Evaluates the probability of a set of strings in log domain for a given initial state distribution. If *start* is specified as a single state, it is taken to be the one-hot assignment to that state.
 
