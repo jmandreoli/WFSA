@@ -7,6 +7,7 @@
 
 import logging; logger = logging.getLogger(__name__)
 import re,collections,pickle
+from functools import cached_property
 from contextlib import contextmanager
 from pathlib import Path
 from numpy import sum, cumsum, ndarray, zeros, nonzero, log, seterr, arange, concatenate, tile, ceil, log10
@@ -255,72 +256,67 @@ Some utilities to browse automata. Kept separate as a plugin for readability.
 #===============================================================================
 
   maxN = 50
+  style = collections.namedtuple('CssStyle','df hd vhd sep c f i')(
+    df='border:thin solid black;text-align:center;',
+    hd='background-color:blue;color: white;',
+    vhd='writing-mode:vertical-lr;min-width:.5cm;',
+    sep='border-left:thick solid black;',
+    c='font-size:x-small;',
+    f='background-color: darkblue;',
+    i='background-color:white;color:blue;',
+  )
 
 #-------------------------------------------------------------------------------
-  def as_html(self,
-    dfstyle='border:thin solid black;text-align:center;',
-    hdstyle='background-color:blue;color: white;',
-    vhdstyle='writing-mode:vertical-lr;min-width:.5cm;',
-    cstyle='font-size:x-small'):
-    r"""
-Returns an html table of the transitions. Use :func:`IPython.display.display` for a nice display in a notebook.
-    """
+  def _repr_html_(self):
 #-------------------------------------------------------------------------------
-    from lxml.html import tostring
     from lxml.html.builder import TABLE,TR,TD,B
+    from lxml.html import tostring
     def rows():
+      style = self.style
+      def s_style(s,v=False,b_style=style.df+style.hd):
+        return b_style+(style.vhd if v else '')+(style.f if s==getattr(self,'final',None) else '')
       def hdr():
         yield info
-        for s,n in enumerate(self.state_names): yield B(n),dict(style=dfstyle+hdstyle+empfinal(s)+vhdstyle)
+        for s,n in enumerate(self.state_names): yield B(n),dict(style=s_style(s,v=True))
         if self.template is not None:
-          yield '🛈',dict(title='template',style=dfstyle+'border-left:thick solid black;')
-          for s,n in enumerate(self.state_names): yield B(n),dict(style=dfstyle+hdstyle+empfinal(s)+vhdstyle)
+          yield '🛈',dict(title='template',style=style.df+style.i+style.sep)
+          for s,n in enumerate(self.state_names): yield B(n),dict(style=s_style(s,v=True))
       def row(s,n):
-        yield B(n),dict(style=dfstyle+hdstyle+empfinal(s))
-        for s2,x in enumerate(toarray(wbar[s]).squeeze()): yield (f'{x:.2}' if x else ''),dict(title=detail(x,*((self.symb_names[c],w[s,s2]) for c,w in enumerate(self.W))),style=dfstyle+cstyle)
+        yield B(n),dict(style=s_style(s))
+        for s2,x in enumerate(toarray(wbar[s]).squeeze()): yield (f'{x:.2}' if x else ''),dict(title=detail(x,*((self.symb_names[c],w[s,s2]) for c,w in enumerate(self.W))),style=style.df+style.c)
         if self.template is not None:
-          yield B(n),dict(style=dfstyle+hdstyle+empfinal(s)+'border-left:thick solid black;')
-          for s2,x in enumerate(toarray(self.template[s]).squeeze()): yield (f'{x:.2}' if x else ''),dict(title=detail(x),style=dfstyle+cstyle)
-      yield hdr()
-      for s,n in enumerate(self.state_names): yield row(s,n)
-    def detail(x,*l):
-      return f'{x:.5}\n'+'\n'.join(f'{c} {v:.5}' for c,v in l if v)
-    def empfinal(s): return 'background-color: darkblue;' if hasattr(self,'final') and s==self.final else ''
-    def td(x,atts=None):
-      if atts is None: atts = {}
-      atts.setdefault('style',dfstyle)
-      return TD(x,**atts)
-    info = '🛈',dict(title=f'{self.N} states, {self.n} symbols, {sum([sum(w!=0) for w in self.W])} transitions\nmtype: {self.mtype}',style=dfstyle+'background-color:white;color:blue;')
-    if self.N<=self.maxN:
-      wbar = 0.
-      for w in self.W: wbar += w
-      html = TABLE(*(TR(*(td(*x) for x in row)) for row in rows()))
-    else: html = TABLE(TR(td(*info)))
-    return tostring(html,encoding=str)
+          yield B(n),dict(style=s_style(s)+style.sep)
+          for s2,x in enumerate(toarray(self.template[s]).squeeze()): yield (f'{x:.2}' if x else ''),dict(title=detail(x),style=style.df+style.c)
+      def detail(x,*l): return f'{x:.5}\n'+'\n'.join(f'{c} {v:.5}' for c,v in l if v)
+      info = '🛈',dict(title=f'{self.N} states, {self.n} symbols, {sum([sum(w != 0) for w in self.W])} transitions\nmtype: {self.mtype}',style=style.df+style.i)
+      if self.N<=self.maxN:
+        wbar = 0.
+        for w in self.W: wbar += w
+        yield hdr()
+        for s,n in enumerate(self.state_names): yield row(s,n)
+      else: yield info,
+    return tostring(TABLE(*(TR(*(TD(x,**atts) for x,atts in row)) for row in rows())),encoding=str)
 
 #-------------------------------------------------------------------------------
-  graph_ = None
-  @property
+  @cached_property
   def graph(self):
     r"""
 Returns a networkx representation of this automaton.
     """
 #-------------------------------------------------------------------------------
     from networkx import DiGraph
-    g = self.graph_
-    if g is None:
-      if self.N>self.maxN: raise ValueError('Model too large; graph cannot be built')
-      self.graph_ = g = DiGraph()
-      for i,n in enumerate(self.state_names): g.add_node(i,name=n,transition=False)
-      i = -1
-      D = self.symb_names
-      for c,w in enumerate(self.W):
-        for sfrom,sto in zip(*nonzero(w)):
-          v = w[sfrom,sto]
-          g.add_node(i,name=D[c],transition=True)
-          g.add_edge(sfrom,i)
-          g.add_edge(i,sto,weight=v)
-          i -= 1
+    if self.N>self.maxN: raise ValueError('Model too large; graph cannot be built')
+    g = DiGraph()
+    for i,n in enumerate(self.state_names): g.add_node(i,name=n,transition=False)
+    i = -1
+    D = self.symb_names
+    for c,w in enumerate(self.W):
+      for sfrom,sto in zip(*nonzero(w)):
+        v = w[sfrom,sto]
+        g.add_node(i,name=D[c],transition=True)
+        g.add_edge(sfrom,i)
+        g.add_edge(i,sto,weight=v)
+        i -= 1
     return g
 
 #-------------------------------------------------------------------------------

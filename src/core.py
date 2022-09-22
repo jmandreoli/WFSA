@@ -50,9 +50,8 @@ Methods:
 
 #-------------------------------------------------------------------------------
   def init_struct(self,W:Union[Sequence[ndarray],Sequence[csr_matrix],Sequence[csra_matrix]],template:Optional[Union[ndarray,csr_matrix,csra_matrix]]=None,state_names:Optional[Sequence[str]]=None,symb_names:Optional[Sequence[str]]=None,check:bool=True):
-    r"""Initialises the structure of this WFSA. If *check* is :const:`True`, a number of consistency checks are performed on the arguments (set to :const:`False` if already checked at invocation)."""
+    r"""Called at initialisation with all the arguments of the constructor. Initialises the structure of this WFSA. If *check* is :const:`True`, a number of consistency checks are performed on the arguments (set to :const:`False` if already checked at invocation)."""
 #-------------------------------------------------------------------------------
-
     W = tuple(W)
     base = W[0] if template is None else template
     if check:
@@ -165,7 +164,7 @@ Runs a batch of sequences in log domain. The sequences in the batch all have the
       template = product(self.template,other.template)
     symb_names, W = zip(*intersect())
     state_names = tuple(f'{s1}.{s2}' for s1 in self.state_names for s2 in other.state_names)
-    return WFSA(W,symb_names=symb_names,state_names=state_names,template=template,check=False)
+    return self.__class__(W,symb_names=symb_names,state_names=state_names,template=template,check=False)
 
 #-------------------------------------------------------------------------------
   def default_state_names(self)->tuple[str,...]: return tuple(str(n) for n in range(self.N))

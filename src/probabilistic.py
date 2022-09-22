@@ -39,9 +39,12 @@ Methods:
   r"""The normaliser to apply to an initial state weight vector before turning it into a distribution"""
 
 #-------------------------------------------------------------------------------
-  def init_struct(self,*a,stop:Optional[str|int]=None,check2=True,**ka):
+  def init_struct(self,*a,stop:Optional[str|int]=None,check2:bool=True,**ka):
     r"""
-Guesses the stop symbol if not provided or :const:`None`. Also guesses the final state. If *check2* is :const:`True`, makes PFSA specific verifications at initialisation.
+Guesses the stop symbol if not provided by *stop* or :const:`None`. Also guesses the final state.
+
+:param stop: the stop symbol (index or name)
+:param check2: whether to make PFSA specific verifications at initialisation
     """
 #-------------------------------------------------------------------------------
     super().init_struct(*a,**ka)
@@ -247,13 +250,15 @@ Returns a sample of this automaton. If *start* is specified as a single state, i
       sample.append(batch,sel,size_)
       size = size_
 
-#===============================================================================
-def toPFSA(self,stop=None,check2=True): # this is a WFSA method, not PFSA!
-  r"""
-Returns a copy of this automaton as a :class:`.PFSA`.
+#-------------------------------------------------------------------------------
+  @classmethod
+  def fromWFSA(cls,x:WFSA,stop:Optional[str|int]=None,check2:bool=True):
+    r"""
+Returns a copy of automaton *x* as a :class:`.PFSA`.
 
-:param stop,check2: same role as in the :class:`.PFSA` constructor
-  """
-#===============================================================================
-  return PFSA([w.copy() for w in self.W],state_names=self.state_names,symb_names=self.symb_names,check=False,stop=stop,check2=check2)
-WFSA.toPFSA = toPFSA
+:param x: the WFSA to convert from
+:param stop: see :meth:`.PFSA.init_struct`
+:param check2: see :meth:`.PFSA.init_struct`
+    """
+#-------------------------------------------------------------------------------
+    return cls([w.copy() for w in x.W],state_names=x.state_names,symb_names=x.symb_names,check=False,stop=stop,check2=check2)
