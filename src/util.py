@@ -269,7 +269,7 @@ Some utilities to browse automata. Kept separate as a plugin for readability.
 #-------------------------------------------------------------------------------
   def _repr_html_(self):
 #-------------------------------------------------------------------------------
-    from lxml.html.builder import TABLE,TR,TD,B
+    from lxml.html.builder import TABLE,TR,TD,B,SPAN
     from lxml.html import tostring
     def rows():
       style = self.style
@@ -277,25 +277,25 @@ Some utilities to browse automata. Kept separate as a plugin for readability.
         return b_style+(style.vhd if v else '')+(style.f if s==getattr(self,'final',None) else '')
       def hdr():
         yield info
-        for s,n in enumerate(self.state_names): yield B(n),dict(style=s_style(s,v=True))
+        for s,n in enumerate(self.state_names): yield TD(B(n),style=s_style(s,v=True))
         if self.template is not None:
-          yield '🛈',dict(title='template',style=style.df+style.i+style.sep)
-          for s,n in enumerate(self.state_names): yield B(n),dict(style=s_style(s,v=True))
+          yield TD(SPAN('🛈'),title='template',style=style.df+style.i+style.sep)
+          for s,n in enumerate(self.state_names): yield TD(B(n),style=s_style(s,v=True))
       def row(s,n):
-        yield B(n),dict(style=s_style(s))
-        for s2,x in enumerate(toarray(wbar[s]).squeeze()): yield (f'{x:.2}' if x else ''),dict(title=detail(x,*((self.symb_names[c],w[s,s2]) for c,w in enumerate(self.W))),style=style.df+style.c)
+        yield TD(B(n),style=s_style(s))
+        for s2,x in enumerate(toarray(wbar[s]).squeeze()): yield TD(SPAN(f'{x:.2}' if x else ''),title=detail(x,((self.symb_names[c],w[s,s2]) for c,w in enumerate(self.W))),style=style.df+style.c)
         if self.template is not None:
-          yield B(n),dict(style=s_style(s)+style.sep)
-          for s2,x in enumerate(toarray(self.template[s]).squeeze()): yield (f'{x:.2}' if x else ''),dict(title=detail(x),style=style.df+style.c)
-      def detail(x,*l): return f'{x:.5}\n'+'\n'.join(f'{c} {v:.5}' for c,v in l if v)
-      info = '🛈',dict(title=f'{self.N} states, {self.n} symbols, {sum([sum(w != 0) for w in self.W])} transitions\nmtype: {self.mtype}',style=style.df+style.i)
+          yield TD(B(n),style=s_style(s)+style.sep)
+          for s2,x in enumerate(toarray(self.template[s]).squeeze()): yield TD(SPAN(f'{x:.2}' if x else ''),title=detail(x),style=style.df+style.c)
+      def detail(x,l=()): return f'{x:.5}\n'+'\n'.join(f'{c} {v:.5}' for c,v in l if v)
+      info = TD(SPAN('🛈'),title=f'{self.N} states, {self.n} symbols, {sum([sum(w != 0) for w in self.W])} transitions\nmtype: {self.mtype}',style=style.df+style.i)
       if self.N<=self.maxN:
         wbar = 0.
         for w in self.W: wbar += w
         yield hdr()
         for s,n in enumerate(self.state_names): yield row(s,n)
       else: yield info,
-    return tostring(TABLE(*(TR(*(TD(x,**atts) for x,atts in row)) for row in rows())),encoding=str)
+    return tostring(TABLE(*(TR(*row) for row in rows())),encoding=str)
 
 #-------------------------------------------------------------------------------
   @cached_property
@@ -320,24 +320,40 @@ Returns a networkx representation of this automaton.
     return g
 
 #-------------------------------------------------------------------------------
-  def draw(self,tune={},ax=None,**ka):
+  def draw(self,ax=None,layout:str='kamada_kawai',**ka):
     r"""
 Draws this automaton as a network (not so great)
     """
 #-------------------------------------------------------------------------------
-    from networkx import bipartite_layout, spring_layout, rescale_layout, draw_networkx, draw_networkx_edge_labels
+    from networkx import draw_networkx, draw_networkx_edge_labels, spring_layout, bipartite_layout, planar_layout, kamada_kawai_layout, spectral_layout
     from matplotlib.pyplot import figure
-    if ax is None: ax = figure(**ka).add_subplot(1,1,1)
-    elif ka: raise ValueError('Keyword arguments allowed only when ax is not given')
+    class Layout:
+      @staticmethod
+      def spring(g,K=5.,k=.5,weight=None,**args): return spring_layout(
+        g,
+        k=k,
+        weight=weight,
+        pos=dict((i,((K/2*(next(g.successors(i))+next(g.predecessors(i))),-1) if n['transition'] else (K*i,0))) for i,n in g.nodes.items()),
+        fixed=[i for i,n in g.nodes.items() if not n['transition']],
+        **args)
+      @staticmethod
+      def bipartite(g,**args): return bipartite_layout(
+        g,
+        nodes=[i for i,n in g.nodes.items() if not n['transition']],
+        **args)
+      @staticmethod
+      def planar(g,**args): return planar_layout(g,**args)
+      @staticmethod
+      def kamada_kawai(g,weight=None,**args): return kamada_kawai_layout(
+        g,
+        weight=weight,
+        pos=Layout.spring(g,**args))
+      @staticmethod
+      def spectral(g,**args): return spectral_layout(g,**args)
+    if ax is None: ax = figure().add_subplot(1,1,1)
+    elif isinstance(ax,dict): ax = figure(**ax).add_subplot(1,1,1)
     g = self.graph
-    k = tune.get('k',.5); K = tune.get('K',5.)
-    pos = dict((i,((K/2*(next(g.successors(i))+next(g.predecessors(i))),-1) if n['transition'] else (K*i,0))) for i,n in g.nodes.items())
-    pos = spring_layout(
-      g,k,
-      pos=pos,
-      fixed=[i for i,n in g.nodes.items() if not n['transition']],
-      weight=None,
-    )
+    pos = getattr(Layout,layout)(g,**ka)
     draw_networkx(
       g,pos,
       node_color=[('m' if n['transition'] else 'c') for n in g.nodes.values()],
@@ -346,7 +362,7 @@ Draws this automaton as a network (not so great)
       ax=ax,
     )
     draw_networkx_edge_labels(
-      g,pos,label_pos=.6,
+      g,pos,
       edge_labels=dict(((i,j),'{:.2f}'.format(e['weight'])) for (i,j),e in g.edges.items() if 'weight' in e),
       font_size=8,
       ax=ax,
