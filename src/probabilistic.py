@@ -105,10 +105,10 @@ Guesses the stop symbol if not provided by *stop* or :const:`None`. Also guesses
     if not allclose(sum(wbar,axis=1),1.):
       wnf = wbar[nonfinal]
       self.normaliser = z = empty(self.N)
-      z[-1] = 1.
-      z[:-1] = solve_(eye_(self.N-1)-wnf[:,nonfinal],wnf[:,final])
-      if not all(z>0): raise ValueError('Non positive normalisation coefficients')
+      z[final] = 1.
+      z[nonfinal] = solve_(eye_(self.N-1)-wnf[:,nonfinal],wnf[:,final])
       logger.info('Normaliser min: %s max: %s',amin(z),amax(z))
+      if not all(z>0): raise ValueError('Non positive normalisation coefficients')
       normalise(wbar,z)
       for w in self.W: normalise(w,z)
 
