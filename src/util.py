@@ -314,8 +314,8 @@ Returns a networkx representation of this automaton.
       for sfrom,sto in zip(*nonzero(w)):
         v = w[sfrom,sto]
         g.add_node(i,name=D[c],transition=True)
-        g.add_edge(sfrom,i)
-        g.add_edge(i,sto,weight=v)
+        g.add_edge(sfrom,i,weight=v)
+        g.add_edge(i,sto)
         i -= 1
     return g
 
@@ -325,7 +325,7 @@ Returns a networkx representation of this automaton.
 Draws this automaton as a network (not so great)
     """
 #-------------------------------------------------------------------------------
-    from networkx import draw_networkx, draw_networkx_edge_labels, spring_layout, bipartite_layout, planar_layout, kamada_kawai_layout, spectral_layout
+    from networkx import draw_networkx, draw_networkx_edge_labels, spring_layout, bipartite_layout, planar_layout, kamada_kawai_layout, spectral_layout, circular_layout, shell_layout
     from matplotlib.pyplot import figure
     class Layout:
       @staticmethod
@@ -350,6 +350,14 @@ Draws this automaton as a network (not so great)
         pos=Layout.spring(g,**args))
       @staticmethod
       def spectral(g,**args): return spectral_layout(g,**args)
+      @staticmethod
+      def circular(g,**args): return circular_layout(g,**args)
+      @staticmethod
+      def shell(g,**args):
+        return shell_layout(
+          g,
+          nlist=[[i for i,n in g.nodes.items() if q(n['transition'])] for q in ((lambda t: not t),(lambda t: t))],
+          **args)
     if ax is None: ax = figure().add_subplot(1,1,1)
     elif isinstance(ax,dict): ax = figure(**ax).add_subplot(1,1,1)
     g = self.graph
@@ -357,7 +365,7 @@ Draws this automaton as a network (not so great)
     draw_networkx(
       g,pos,
       node_color=[('m' if n['transition'] else 'c') for n in g.nodes.values()],
-      edge_color=[('k' if 'weight' in e else 'c') for e in g.edges.values()],
+      edge_color=[('c' if 'weight' in e else 'm') for e in g.edges.values()],
       labels=dict((i,n['name']) for i,n in g.nodes.items()),
       ax=ax,
     )
